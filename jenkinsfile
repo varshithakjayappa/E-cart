@@ -1,1 +1,79 @@
+pipeline {
+    agent any
+    tools {
+        maven "maven3"
+        jdk "jdk17"
+    }
+    
+    environment {
+        SCANNER_HOME = tool "sonar-scanner"
+    }
 
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/varshithakjayappa/E-cart.git'
+            }
+        }
+        
+        stage('Compile') {
+            steps {
+                 sh "mvn compile"
+            }
+        }
+        
+        stage('Unit Tests') {
+            steps {
+                sh "mvn test -DskipTests=true"
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=Ekart -Dsonar.projectName=Ekart \
+                    -Dsonar.java.binaries=target/classes'''
+                }
+            }
+        }
+        
+        stage('OWSAP Dependency check') {
+            steps {
+                dependencyCheck additionalArguments: ' --scan ./', odcInstallation: 'DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+               sh "mvn package -DskipTests=true"
+            }
+        }
+        
+        stage('Deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+    
+        stage('Docker build & image tag') {
+            steps {
+                 sh "docker build -t varshithakj/ekart:latest -f docker/Dockerfile ."
+            }
+        }
+     
+        stage('Trivy scan') {
+            steps {
+               sh "trivy image varshithakj/ekart:latest > trivy-report.txt"
+            }
+        }
+        
+        stage('Docker push') {
+            steps {
+                 sh "docker push varshithakj/ekart:latest"
+                }
+            }
+        }
+}
